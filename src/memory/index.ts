@@ -20,12 +20,36 @@ interface Entity {
   name: string;
   entityType: string;
   observations: string[];
+  status?: string;
+  priority?: string;
+  deadline?: string;
 }
 
 interface Relation {
   from: string;
   to: string;
   relationType: string;
+}
+
+interface Task extends Entity {
+  status: string;
+  priority: string;
+  deadline: string;
+}
+
+interface Plan extends Entity {
+  steps: string[];
+}
+
+interface Progress extends Entity {
+  status: string;
+  completionPercentage: number;
+  blockers: string[];
+}
+
+interface Summary extends Entity {
+  content: string;
+  date: string;
 }
 
 interface KnowledgeGraph {
@@ -176,6 +200,97 @@ class KnowledgeGraphManager {
   
     return filteredGraph;
   }
+
+  async createTask(task: Task): Promise<Task> {
+    const graph = await this.loadGraph();
+    if (graph.entities.some(e => e.name === task.name)) {
+      throw new Error(`Task with name ${task.name} already exists`);
+    }
+    graph.entities.push(task);
+    await this.saveGraph(graph);
+    return task;
+  }
+
+  async updateTaskStatus(taskName: string, status: string): Promise<Task> {
+    const graph = await this.loadGraph();
+    const task = graph.entities.find(e => e.name === taskName && e.entityType === 'Task') as Task;
+    if (!task) {
+      throw new Error(`Task with name ${taskName} not found`);
+    }
+    task.status = status;
+    await this.saveGraph(graph);
+    return task;
+  }
+
+  async addPlanStep(planName: string, step: string): Promise<Plan> {
+    const graph = await this.loadGraph();
+    const plan = graph.entities.find(e => e.name === planName && e.entityType === 'Plan') as Plan;
+    if (!plan) {
+      throw new Error(`Plan with name ${planName} not found`);
+    }
+    if (!plan.steps) {
+      plan.steps = [];
+    }
+    plan.steps.push(step);
+    await this.saveGraph(graph);
+    return plan;
+  }
+
+  async updateProgress(progressName: string, update: Partial<Progress>): Promise<Progress> {
+    const graph = await this.loadGraph();
+    const progress = graph.entities.find(e => e.name === progressName && e.entityType === 'Progress') as Progress;
+    if (!progress) {
+      throw new Error(`Progress with name ${progressName} not found`);
+    }
+    Object.assign(progress, update);
+    await this.saveGraph(graph);
+    return progress;
+  }
+
+  async addCodeSnippet(taskName: string, snippet: string): Promise<Task> {
+    const graph = await this.loadGraph();
+    const task = graph.entities.find(e => e.name === taskName && e.entityType === 'Task') as Task;
+    if (!task) {
+      throw new Error(`Task with name ${taskName} not found`);
+    }
+    task.observations.push(`Code snippet: ${snippet}`);
+    await this.saveGraph(graph);
+    return task;
+  }
+
+  async generateProjectSummary(projectName: string): Promise<Summary> {
+    const graph = await this.loadGraph();
+    const projectEntities = graph.entities.filter(e => e.name.startsWith(projectName));
+    const tasks = projectEntities.filter(e => e.entityType === 'Task') as Task[];
+    const progress = projectEntities.find(e => e.entityType === 'Progress') as Progress;
+
+    let content = `Project: ${projectName}\n`;
+    content += `Overall Progress: ${progress ? progress.completionPercentage : 0}%\n`;
+    content += `Tasks:\n`;
+    tasks.forEach(task => {
+      content += `- ${task.name}: ${task.status}\n`;
+    });
+    content += `Key Achievements:\n`;
+    tasks.filter(t => t.status === 'Completed').forEach(task => {
+      content += `- Completed ${task.name}\n`;
+    });
+    content += `Next Steps:\n`;
+    tasks.filter(t => t.status === 'In Progress').forEach(task => {
+      content += `- Continue work on ${task.name}\n`;
+    });
+
+    const summary: Summary = {
+      name: `${projectName}_summary`,
+      entityType: 'Summary',
+      observations: [],
+      content,
+      date: new Date().toISOString(),
+    };
+
+    graph.entities.push(summary);
+    await this.saveGraph(graph);
+    return summary;
+  }
 }
 
 const knowledgeGraphManager = new KnowledgeGraphManager();
@@ -320,95 +435,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 properties: {
                   from: { type: "string", description: "The name of the entity where the relation starts" },
                   to: { type: "string", description: "The name of the entity where the relation ends" },
-                  relationType: { type: "string", description: "The type of the relation" },
-                },
-                required: ["from", "to", "relationType"],
-              },
-              description: "An array of relations to delete" 
-            },
-          },
-          required: ["relations"],
-        },
-      },
-      {
-        name: "read_graph",
-        description: "Read the entire knowledge graph",
-        inputSchema: {
-          type: "object",
-          properties: {},
-        },
-      },
-      {
-        name: "search_nodes",
-        description: "Search for nodes in the knowledge graph based on a query",
-        inputSchema: {
-          type: "object",
-          properties: {
-            query: { type: "string", description: "The search query to match against entity names, types, and observation content" },
-          },
-          required: ["query"],
-        },
-      },
-      {
-        name: "open_nodes",
-        description: "Open specific nodes in the knowledge graph by their names",
-        inputSchema: {
-          type: "object",
-          properties: {
-            names: {
-              type: "array",
-              items: { type: "string" },
-              description: "An array of entity names to retrieve",
-            },
-          },
-          required: ["names"],
-        },
-      },
-    ],
-  };
-});
+                  relationType: { type: "string", description: "The type ofHere is the continued modified src/memory/index.ts file:
 
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
-
-  if (!args) {
-    throw new Error(`No arguments provided for tool: ${name}`);
-  }
-
-  switch (name) {
-    case "create_entities":
-      return { toolResult: await knowledgeGraphManager.createEntities(args.entities as Entity[]) };
-    case "create_relations":
-      return { toolResult: await knowledgeGraphManager.createRelations(args.relations as Relation[]) };
-    case "add_observations":
-      return { toolResult: await knowledgeGraphManager.addObservations(args.observations as { entityName: string; contents: string[] }[]) };
-    case "delete_entities":
-      await knowledgeGraphManager.deleteEntities(args.entityNames as string[]);
-      return { toolResult: "Entities deleted successfully" };
-    case "delete_observations":
-      await knowledgeGraphManager.deleteObservations(args.deletions as { entityName: string; observations: string[] }[]);
-      return { toolResult: "Observations deleted successfully" };
-    case "delete_relations":
-      await knowledgeGraphManager.deleteRelations(args.relations as Relation[]);
-      return { toolResult: "Relations deleted successfully" };
-    case "read_graph":
-      return { toolResult: await knowledgeGraphManager.readGraph() };
-    case "search_nodes":
-      return { toolResult: await knowledgeGraphManager.searchNodes(args.query as string) };
-    case "open_nodes":
-      return { toolResult: await knowledgeGraphManager.openNodes(args.names as string[]) };
-    default:
-      throw new Error(`Unknown tool: ${name}`);
-  }
-});
-
-async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error("Knowledge Graph MCP Server running on stdio");
-}
-
-main().catch((error) => {
-  console.error("Fatal error in main():", error);
-  process.exit(1);
-});
+src/memory/index.ts
