@@ -434,6 +434,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }),
         );
         return {
-          content: [{ type: "text", text: results.join("\Here is the continued /src/filesystem/index.ts file with the suggested changes:
+          content: [{ type: "text", text: results.join("\n") }],
+        };
+      }
 
-/src/filesystem/index.ts
+      // Additional cases for other tools would go here...
+
+    }
+  } catch (error) {
+    console.error("Error handling request:", error);
+    throw new Error("Internal server error");
+  }
+});
