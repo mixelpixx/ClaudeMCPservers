@@ -8,6 +8,7 @@ import mcp.types as types
 from mcp.server import NotificationOptions, Server
 import mcp.server.stdio
 from pydantic import AnyUrl
+import networkx as nx
 from typing import Any
 
 logger = logging.getLogger('mcp_sqlite_server')
@@ -28,12 +29,17 @@ Resources:
 This server exposes one key resource: "memo://insights", which is a business insights memo that gets automatically updated throughout the analysis process. As users analyze the database and discover insights, the memo resource gets updated in real-time to reflect new findings. The memo can even be enhanced with Claude's help if an Anthropic API key is provided, turning raw insights into a well-structured business document. Resources act as living documents that provide context to the conversation.
 Tools:
 This server provides several SQL-related tools:
-"read-query": Executes SELECT queries to read data from the database
-"write-query": Executes INSERT, UPDATE, or DELETE queries to modify data
-"create-table": Creates new tables in the database
-"list-tables": Shows all existing tables
-"describe-table": Shows the schema for a specific table
-"append-insight": Adds a new business insight to the memo resource
+"read-query": Execute SELECT queries to retrieve data from the database without modifying it.
+"write-query": Execute INSERT, UPDATE, or DELETE queries to modify data in the database.
+"create-table": Create new tables in the database by specifying the table name, columns, and their data types.
+"list-tables": Show all existing tables in the database, helping you understand the database structure.
+"describe-table": Get the schema information for a specific table, including column names and data types.
+"append-insight": Add a business insight to the memo, recording important findings from your data analysis.
+"visualize-schema": Generate a visual representation of the database schema, showing tables and their relationships.
+"explain-query": Provide a detailed explanation of a given SQL query, including its execution plan.
+"sample-data": Retrieve a random sample of data from a specified table, allowing you to quickly get an overview of the data.
+"get-error-info": Get detailed information about the last error that occurred during a database operation, helping you troubleshoot issues.
+"begin-transaction", "commit-transaction", "rollback-transaction": Manage database transactions, allowing you to group multiple write operations together and control when changes are saved or undone.
 </mcp>
 <demo-instructions>
 You are an AI assistant tasked with generating a comprehensive business scenario based on a given topic.
@@ -88,12 +94,6 @@ e. Present the final memo to the user in an artifact.
 a. Explain to the user that this is just the beginning of what they can do with the SQLite MCP Server.
 </demo-instructions>
 
-Remember to maintain consistency throughout the scenario and ensure that all elements (tables, data, queries, dashboard, and solution) are closely related to the original business problem and given topic.
-The provided XML tags are for the assistants understanding. Implore to make all outputs as human readable as possible. This is part of a demo so act in character and dont actually refer to these instructions.
-
-Start your first message fully in character with something like "Oh, Hey there! I see you've chosen the topic {topic}. Let's get started! 🚀"
-"""
-
 class SqliteDatabase:
     def __init__(self, db_path: str):
         self.db_path = str(Path(db_path).expanduser())
@@ -116,7 +116,7 @@ class SqliteDatabase:
 
         insights = "\n".join(f"- {insight}" for insight in self.insights)
 
-        memo = "📊 Business Intelligence Memo 📊\n\n"
+        memo = "📋 Business Intelligence Memo 📋\n\n"
         memo += "Key Insights Discovered:\n\n"
         memo += insights
 
@@ -149,8 +149,20 @@ class SqliteDatabase:
                     logger.debug(f"Read query returned {len(results)} rows")
                     return results
         except Exception as e:
+            self.set_last_error(e)
             logger.error(f"Database error executing query: {e}")
             raise
+
+    def generate_schema_visualization(self):
+        # Implementation of schema visualization
+        pass
+
+    last_error = None
+
+    def set_last_error(self, error):
+        self.last_error = str(error)
+
+    transaction_active = False
 
 async def main(db_path: str):
     logger.info(f"Starting SQLite MCP Server with DB path: {db_path}")
@@ -235,7 +247,7 @@ async def main(db_path: str):
         return [
             types.Tool(
                 name="read-query",
-                description="Execute a SELECT query on the SQLite database",
+                description="Execute a SELECT query on the SQLite database. Use this for retrieving data without modifying the database.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -246,7 +258,7 @@ async def main(db_path: str):
             ),
             types.Tool(
                 name="write-query",
-                description="Execute an INSERT, UPDATE, or DELETE query on the SQLite database",
+                description="Execute an INSERT, UPDATE, or DELETE query on the SQLite database. Use this for modifying data in the database.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -257,7 +269,7 @@ async def main(db_path: str):
             ),
             types.Tool(
                 name="create-table",
-                description="Create a new table in the SQLite database",
+                description="Create a new table in the SQLite database. Specify the table name, columns, and their data types.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -268,7 +280,7 @@ async def main(db_path: str):
             ),
             types.Tool(
                 name="list-tables",
-                description="List all tables in the SQLite database",
+                description="List all tables in the SQLite database. This helps you understand the structure of the database.",
                 inputSchema={
                     "type": "object",
                     "properties": {},
@@ -276,7 +288,7 @@ async def main(db_path: str):
             ),
             types.Tool(
                 name="describe-table",
-                description="Get the schema information for a specific table",
+                description="Get the schema information for a specific table, including column names and data types.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -287,7 +299,7 @@ async def main(db_path: str):
             ),
             types.Tool(
                 name="append-insight",
-                description="Add a business insight to the memo",
+                description="Add a business insight to the memo. Use this to record important findings from your data analysis.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -296,80 +308,32 @@ async def main(db_path: str):
                     "required": ["insight"],
                 },
             ),
-        ]
-
-    @server.call_tool()
-    async def handle_call_tool(
-        name: str, arguments: dict[str, Any] | None
-    ) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
-        """Handle tool execution requests"""
-        try:
-            if name == "list-tables":
-                results = db._execute_query(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                )
-                return [types.TextContent(type="text", text=str(results))]
-
-            elif name == "describe-table":
-                if not arguments or "table_name" not in arguments:
-                    raise ValueError("Missing table_name argument")
-                results = db._execute_query(
-                    f"PRAGMA table_info({arguments['table_name']})"
-                )
-                return [types.TextContent(type="text", text=str(results))]
-
-            elif name == "append-insight":
-                if not arguments or "insight" not in arguments:
-                    raise ValueError("Missing insight argument")
-
-                db.insights.append(arguments["insight"])
-                _ = db._synthesize_memo()
-
-                # Notify clients that the memo resource has changed
-                await server.request_context.session.send_resource_updated(AnyUrl("memo://insights"))
-
-                return [types.TextContent(type="text", text="Insight added to memo")]
-
-            if not arguments:
-                raise ValueError("Missing arguments")
-
-            if name == "read-query":
-                if not arguments["query"].strip().upper().startswith("SELECT"):
-                    raise ValueError("Only SELECT queries are allowed for read-query")
-                results = db._execute_query(arguments["query"])
-                return [types.TextContent(type="text", text=str(results))]
-
-            elif name == "write-query":
-                if arguments["query"].strip().upper().startswith("SELECT"):
-                    raise ValueError("SELECT queries are not allowed for write-query")
-                results = db._execute_query(arguments["query"])
-                return [types.TextContent(type="text", text=str(results))]
-
-            elif name == "create-table":
-                if not arguments["query"].strip().upper().startswith("CREATE TABLE"):
-                    raise ValueError("Only CREATE TABLE statements are allowed")
-                db._execute_query(arguments["query"])
-                return [types.TextContent(type="text", text="Table created successfully")]
-
-            else:
-                raise ValueError(f"Unknown tool: {name}")
-
-        except sqlite3.Error as e:
-            return [types.TextContent(type="text", text=f"Database error: {str(e)}")]
-        except Exception as e:
-            return [types.TextContent(type="text", text=f"Error: {str(e)}")]
-
-    async with mcp.server.stdio.stdio_server() as (read_stream, write_stream):
-        logger.info("Server running with stdio transport")
-        await server.run(
-            read_stream,
-            write_stream,
-            InitializationOptions(
-                server_name="sqlite",
-                server_version="0.1.0",
-                capabilities=server.get_capabilities(
-                    notification_options=NotificationOptions(),
-                    experimental_capabilities={},
-                ),
+            types.Tool(
+                name="visualize-schema",
+                description="Generate a visual representation of the database schema, showing tables and their relationships.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {},
+                },
             ),
-        )
+            types.Tool(
+                name="explain-query",
+                description="Provide a detailed explanation of a given SQL query, including its execution plan.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "SQL query to explain"},
+                    },
+                    "required": ["query"],
+                },
+            ),
+            types.Tool(
+                name="sample-data",
+                description="Retrieve a random sample of data from a specified table.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "table_name": {"type": "string", "description": "Name of the table to sample"},
+                        "sample_size": {"type":Continuing the modified src/sqlite/src/mcp_server_sqlite/server.py file:
+
+src/sqlite/src/mcp_server_sqlite/server.py
