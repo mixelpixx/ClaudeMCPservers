@@ -19,6 +19,7 @@ import {
   GitHubTreeSchema,
   GitHubCommitSchema,
   CreateRepositoryOptionsSchema,
+  CreateCommentOptionsSchema,
   CreateIssueOptionsSchema,
   CreatePullRequestOptionsSchema,
   CreateBranchOptionsSchema,
@@ -41,7 +42,10 @@ import {
   CreateIssueSchema,
   CreatePullRequestSchema,
   ForkRepositorySchema,
-  CreateBranchSchema
+  CreateBranchSchema,
+  GetRepositorySchema,
+  ListBranchesSchema,
+  SearchIssuesAndPullRequestsSchema
 } from './schemas.js';
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
@@ -49,6 +53,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 const server = new Server({
   name: "github-mcp-server",
   version: "0.1.0",
+  rateLimit: { maxRequests: 5000, perSeconds: 3600 },
 }, {
   capabilities: {
     tools: {}
@@ -60,6 +65,33 @@ const GITHUB_PERSONAL_ACCESS_TOKEN = process.env.GITHUB_PERSONAL_ACCESS_TOKEN;
 if (!GITHUB_PERSONAL_ACCESS_TOKEN) {
   console.error("GITHUB_PERSONAL_ACCESS_TOKEN environment variable is not set");
   process.exit(1);
+}
+
+async function getRateLimit(): Promise<{ remaining: number, limit: number, reset: number }> {
+  const response = await fetch('https://api.github.com/rate_limit', {
+    headers: {
+      "Authorization": `token ${GITHUB_PERSONAL_ACCESS_TOKEN}`,
+      "Accept": "application/vnd.github.v3+json",
+      "User-Agent": "github-mcp-server"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`GitHub API error: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return {
+    remaining: data.rate.remaining,
+    limit: data.rate.limit,
+    reset: data.rate.reset
+  };
+}
+
+async function handleRateLimit() {
+  const { remaining, limit, reset } = await getRateLimit();
+  console.error(`Rate limit: ${remaining}/${limit} remaining. Resets at ${new Date(reset * 1000).toISOString()}`);
+  return { remaining, limit, reset };
 }
 
 async function forkRepository(
@@ -440,207 +472,4 @@ async function searchRepositories(
   });
 
   if (!response.ok) {
-    throw new Error(`GitHub API error: ${response.statusText}`);
-  }
-
-  return GitHubSearchResponseSchema.parse(await response.json());
-}
-
-async function createRepository(
-  options: z.infer<typeof CreateRepositoryOptionsSchema>
-): Promise<GitHubRepository> {
-  const response = await fetch("https://api.github.com/user/repos", {
-    method: "POST",
-    headers: {
-      "Authorization": `token ${GITHUB_PERSONAL_ACCESS_TOKEN}`,
-      "Accept": "application/vnd.github.v3+json",
-      "User-Agent": "github-mcp-server",
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(options)
-  });
-
-  if (!response.ok) {
-    throw new Error(`GitHub API error: ${response.statusText}`);
-  }
-
-  return GitHubRepositorySchema.parse(await response.json());
-}
-
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return {
-    tools: [
-      {
-        name: "create_or_update_file",
-        description: "Create or update a single file in a GitHub repository",
-        inputSchema: zodToJsonSchema(CreateOrUpdateFileSchema)
-      },
-      {
-        name: "search_repositories",
-        description: "Search for GitHub repositories",
-        inputSchema: zodToJsonSchema(SearchRepositoriesSchema)
-      },
-      {
-        name: "create_repository",
-        description: "Create a new GitHub repository in your account",
-        inputSchema: zodToJsonSchema(CreateRepositorySchema)
-      },
-      {
-        name: "get_file_contents",
-        description: "Get the contents of a file or directory from a GitHub repository",
-        inputSchema: zodToJsonSchema(GetFileContentsSchema)
-      },
-      {
-        name: "push_files",
-        description: "Push multiple files to a GitHub repository in a single commit",
-        inputSchema: zodToJsonSchema(PushFilesSchema)
-      },
-      {
-        name: "create_issue",
-        description: "Create a new issue in a GitHub repository",
-        inputSchema: zodToJsonSchema(CreateIssueSchema)
-      },
-      {
-        name: "create_pull_request",
-        description: "Create a new pull request in a GitHub repository",
-        inputSchema: zodToJsonSchema(CreatePullRequestSchema)
-      },
-      {
-        name: "fork_repository",
-        description: "Fork a GitHub repository to your account or specified organization",
-        inputSchema: zodToJsonSchema(ForkRepositorySchema)
-      },
-      {
-        name: "create_branch",
-        description: "Create a new branch in a GitHub repository",
-        inputSchema: zodToJsonSchema(CreateBranchSchema)
-      }
-    ]
-  };
-});
-
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  try {
-    if (!request.params.arguments) {
-      throw new Error("Arguments are required");
-    }
-
-    switch (request.params.name) {
-      case "fork_repository": {
-        const args = ForkRepositorySchema.parse(request.params.arguments);
-        const fork = await forkRepository(args.owner, args.repo, args.organization);
-        return { toolResult: fork };
-      }
-
-      case "create_branch": {
-        const args = CreateBranchSchema.parse(request.params.arguments);
-        let sha: string;
-        if (args.from_branch) {
-          const response = await fetch(
-            `https://api.github.com/repos/${args.owner}/${args.repo}/git/refs/heads/${args.from_branch}`,
-            {
-              headers: {
-                "Authorization": `token ${GITHUB_PERSONAL_ACCESS_TOKEN}`,
-                "Accept": "application/vnd.github.v3+json",
-                "User-Agent": "github-mcp-server"
-              }
-            }
-          );
-
-          if (!response.ok) {
-            throw new Error(`Source branch '${args.from_branch}' not found`);
-          }
-
-          const data = GitHubReferenceSchema.parse(await response.json());
-          sha = data.object.sha;
-        } else {
-          sha = await getDefaultBranchSHA(args.owner, args.repo);
-        }
-
-        const branch = await createBranch(args.owner, args.repo, {
-          ref: args.branch,
-          sha
-        });
-
-        return { toolResult: branch };
-      }
-
-      case "search_repositories": {
-        const args = SearchRepositoriesSchema.parse(request.params.arguments);
-        const results = await searchRepositories(args.query, args.page, args.perPage);
-        return { toolResult: results };
-      }
-
-      case "create_repository": {
-        const args = CreateRepositorySchema.parse(request.params.arguments);
-        const repository = await createRepository(args);
-        return { toolResult: repository };
-      }
-
-      case "get_file_contents": {
-        const args = GetFileContentsSchema.parse(request.params.arguments);
-        const contents = await getFileContents(args.owner, args.repo, args.path, args.branch);
-        return { toolResult: contents };
-      }
-
-      case "create_or_update_file": {
-        const args = CreateOrUpdateFileSchema.parse(request.params.arguments);
-        const result = await createOrUpdateFile(
-          args.owner,
-          args.repo,
-          args.path,
-          args.content,
-          args.message,
-          args.branch,
-          args.sha
-        );
-        return { toolResult: result };
-      }
-
-      case "push_files": {
-        const args = PushFilesSchema.parse(request.params.arguments);
-        const result = await pushFiles(
-          args.owner,
-          args.repo,
-          args.branch,
-          args.files,
-          args.message
-        );
-        return { toolResult: result };
-      }
-
-      case "create_issue": {
-        const args = CreateIssueSchema.parse(request.params.arguments);
-        const { owner, repo, ...options } = args;
-        const issue = await createIssue(owner, repo, options);
-        return { toolResult: issue };
-      }
-
-      case "create_pull_request": {
-        const args = CreatePullRequestSchema.parse(request.params.arguments);
-        const { owner, repo, ...options } = args;
-        const pullRequest = await createPullRequest(owner, repo, options);
-        return { toolResult: pullRequest };
-      }
-
-      default:
-        throw new Error(`Unknown tool: ${request.params.name}`);
-    }
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      throw new Error(`Invalid arguments: ${error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ')}`);
-    }
-    throw error;
-  }
-});
-
-async function runServer() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error("GitHub MCP Server running on stdio");
-}
-
-runServer().catch((error) => {
-  console.error("Fatal error in main():", error);
-  process.exit(1);
-});
+    throw new Error(`GitHub API error: ${response.statusText}`Continuing the src/github/index.ts file:

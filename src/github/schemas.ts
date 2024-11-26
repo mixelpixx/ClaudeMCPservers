@@ -254,6 +254,17 @@ export const GitHubIssueSchema = z.object({
   body: z.string()
 });
 
+export const GitHubIssueCommentSchema = z.object({
+  id: z.number(),
+  node_id: z.string(),
+  url: z.string(),
+  html_url: z.string(),
+  body: z.string(),
+  user: GitHubIssueAssigneeSchema,
+  created_at: z.string(),
+  updated_at: z.string()
+});
+
 // Pull Request related schemas
 export const GitHubPullRequestHeadSchema = z.object({
   label: z.string(),
@@ -358,11 +369,30 @@ export const CreateBranchSchema = RepoParamsSchema.extend({
     .describe("Optional: source branch to create from (defaults to the repository's default branch)")
 });
 
+export const GetRepositorySchema = RepoParamsSchema;
+
+export const ListBranchesSchema = RepoParamsSchema.extend({
+  page: z.number().optional().describe("Page number for pagination (default: 1)"),
+  perPage: z.number().optional().describe("Number of results per page (default: 30, max: 100)")
+});
+
+export const SearchIssuesAndPullRequestsSchema = z.object({
+  query: z.string().describe("Search query (see GitHub search syntax for issues and pull requests)"),
+  page: z.number().optional().describe("Page number for pagination (default: 1)"),
+  perPage: z.number().optional().describe("Number of results per page (default: 30, max: 100)")
+});
+
+export const CreateCommentSchema = RepoParamsSchema.extend({
+  issueNumber: z.number().describe("The number of the issue or pull request"),
+  body: z.string().describe("The contents of the comment")
+});
+
 // Export types
 export type GitHubAuthor = z.infer<typeof GitHubAuthorSchema>;
 export type GitHubFork = z.infer<typeof GitHubForkSchema>;
 export type GitHubIssue = z.infer<typeof GitHubIssueSchema>;
-export type GitHubPullRequest = z.infer<typeof GitHubPullRequestSchema>;export type GitHubRepository = z.infer<typeof GitHubRepositorySchema>;
+export type GitHubPullRequest = z.infer<typeof GitHubPullRequestSchema>;
+export type GitHubRepository = z.infer<typeof GitHubRepositorySchema>;
 export type GitHubFileContent = z.infer<typeof GitHubFileContentSchema>;
 export type GitHubDirectoryContent = z.infer<typeof GitHubDirectoryContentSchema>;
 export type GitHubContent = z.infer<typeof GitHubContentSchema>;
@@ -376,3 +406,4 @@ export type CreatePullRequestOptions = z.infer<typeof CreatePullRequestOptionsSc
 export type CreateBranchOptions = z.infer<typeof CreateBranchOptionsSchema>;
 export type GitHubCreateUpdateFileResponse = z.infer<typeof GitHubCreateUpdateFileResponseSchema>;
 export type GitHubSearchResponse = z.infer<typeof GitHubSearchResponseSchema>;
+export type GitHubIssueComment = z.infer<typeof GitHubIssueCommentSchema>;
