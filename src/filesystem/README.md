@@ -5,6 +5,23 @@ Node.js server implementing Model Context Protocol (MCP) for filesystem operatio
 ## Features
 
 
+## Getting Started
+
+1. Install dependencies:
+   ```
+   npm install
+   ```
+
+2. Start the server:
+   ```
+   npm start -- /path/to/allowed/directory [/path/to/another/allowed/directory ...]
+   ```
+
+   Or use the provided start script:
+   ```
+   ./start.sh /path/to/allowed/directory [/path/to/another/allowed/directory ...]
+   ```
+
 **Note**: The server will only allow operations within directories specified via `args`.
 
 ## API
