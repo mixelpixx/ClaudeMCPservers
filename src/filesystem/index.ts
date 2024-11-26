@@ -10,6 +10,11 @@ import {
 import fs from "fs/promises";
 import path from "path";
 import os from 'os';
+import zlib from 'zlib';
+import crypto from 'crypto';
+import { promisify } from 'util';
+import { diffLines } from 'diff';
+import fileType from 'file-type';
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
@@ -122,6 +127,41 @@ const MoveFileArgsSchema = z.object({
 const SearchFilesArgsSchema = z.object({
   path: z.string(),
   pattern: z.string(),
+});
+
+const CompressFileArgsSchema = z.object({
+  path: z.string(),
+  algorithm: z.enum(['gzip', 'deflate', 'brotli']),
+});
+
+const DecompressFileArgsSchema = z.object({
+  path: z.string(),
+  algorithm: z.enum(['gzip', 'deflate', 'brotli']),
+});
+
+const EncryptFileArgsSchema = z.object({
+  path: z.string(),
+  password: z.string(),
+});
+
+const DecryptFileArgsSchema = z.object({
+  path: z.string(),
+  password: z.string(),
+});
+
+const DiffFilesArgsSchema = z.object({
+  path1: z.string(),
+  path2: z.string(),
+});
+
+const SearchInFileArgsSchema = z.object({
+  path: z.string(),
+  searchTerm: z.string(),
+});
+
+const HashFileArgsSchema = z.object({
+  path: z.string(),
+  algorithm: z.enum(['md5', 'sha1', 'sha256', 'sha512']),
 });
 
 const GetFileInfoArgsSchema = z.object({
@@ -271,6 +311,70 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: zodToJsonSchema(SearchFilesArgsSchema) as ToolInput,
       },
       {
+        name: "compress_file",
+        description:
+          "Compress a file using the specified algorithm (gzip, deflate, or brotli). " +
+          "The compressed file will be saved with an appropriate extension. " +
+          "Only works within allowed directories.",
+        inputSchema: zodToJsonSchema(CompressFileArgsSchema) as ToolInput,
+      },
+      {
+        name: "decompress_file",
+        description:
+          "Decompress a file using the specified algorithm (gzip, deflate, or brotli). " +
+          "The decompressed file will be saved without the compression extension. " +
+          "Only works within allowed directories.",
+        inputSchema: zodToJsonSchema(DecompressFileArgsSchema) as ToolInput,
+      },
+      {
+        name: "encrypt_file",
+        description:
+          "Encrypt a file using AES-256-CBC encryption with the provided password. " +
+          "The encrypted file will be saved with a .enc extension. " +
+          "Only works within allowed directories.",
+        inputSchema: zodToJsonSchema(EncryptFileArgsSchema) as ToolInput,
+      },
+      {
+        name: "decrypt_file",
+        description:
+          "Decrypt a file that was encrypted using the encrypt_file tool. " +
+          "Requires the same password used for encryption. " +
+          "Only works within allowed directories.",
+        inputSchema: zodToJsonSchema(DecryptFileArgsSchema) as ToolInput,
+      },
+      {
+        name: "diff_files",
+        description:
+          "Compare two text files and return their differences in a human-readable format. " +
+          "This tool is useful for identifying changes between different versions of a file. " +
+          "Only works within allowed directories.",
+        inputSchema: zodToJsonSchema(DiffFilesArgsSchema) as ToolInput,
+      },
+      {
+        name: "search_in_file",
+        description:
+          "Search for a specific term within a text file and return matching lines with line numbers. " +
+          "This tool is useful for finding specific content within large text files. " +
+          "Only works within allowed directories.",
+        inputSchema: zodToJsonSchema(SearchInFileArgsSchema) as ToolInput,
+      },
+      {
+        name: "hash_file",
+        description:
+          "Generate a hash of a file using the specified algorithm (md5, sha1, sha256, or sha512). " +
+          "This tool is useful for verifying file integrity or detecting changes. " +
+          "Only works within allowed directories.",
+        inputSchema: zodToJsonSchema(HashFileArgsSchema) as ToolInput,
+      },
+      {
+        name: "detect_file_type",
+        description:
+          "Detect the file type of a given file based on its content (magic numbers). " +
+          "This tool can identify various file formats, even if the file extension is missing or incorrect. " +
+          "Only works within allowed directories.",
+        inputSchema: zodToJsonSchema(GetFileInfoArgsSchema) as ToolInput,
+      },
+      {
         name: "get_file_info",
         description:
           "Retrieve detailed metadata about a file or directory. Returns comprehensive " +
@@ -330,118 +434,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }),
         );
         return {
-          content: [{ type: "text", text: results.join("\n---\n") }],
-        };
-      }
+          content: [{ type: "text", text: results.join("\Here is the continued /src/filesystem/index.ts file with the suggested changes:
 
-      case "write_file": {
-        const parsed = WriteFileArgsSchema.safeParse(args);
-        if (!parsed.success) {
-          throw new Error(`Invalid arguments for write_file: ${parsed.error}`);
-        }
-        const validPath = await validatePath(parsed.data.path);
-        await fs.writeFile(validPath, parsed.data.content, "utf-8");
-        return {
-          content: [{ type: "text", text: `Successfully wrote to ${parsed.data.path}` }],
-        };
-      }
-
-      case "create_directory": {
-        const parsed = CreateDirectoryArgsSchema.safeParse(args);
-        if (!parsed.success) {
-          throw new Error(`Invalid arguments for create_directory: ${parsed.error}`);
-        }
-        const validPath = await validatePath(parsed.data.path);
-        await fs.mkdir(validPath, { recursive: true });
-        return {
-          content: [{ type: "text", text: `Successfully created directory ${parsed.data.path}` }],
-        };
-      }
-
-      case "list_directory": {
-        const parsed = ListDirectoryArgsSchema.safeParse(args);
-        if (!parsed.success) {
-          throw new Error(`Invalid arguments for list_directory: ${parsed.error}`);
-        }
-        const validPath = await validatePath(parsed.data.path);
-        const entries = await fs.readdir(validPath, { withFileTypes: true });
-        const formatted = entries
-          .map((entry) => `${entry.isDirectory() ? "[DIR]" : "[FILE]"} ${entry.name}`)
-          .join("\n");
-        return {
-          content: [{ type: "text", text: formatted }],
-        };
-      }
-
-      case "move_file": {
-        const parsed = MoveFileArgsSchema.safeParse(args);
-        if (!parsed.success) {
-          throw new Error(`Invalid arguments for move_file: ${parsed.error}`);
-        }
-        const validSourcePath = await validatePath(parsed.data.source);
-        const validDestPath = await validatePath(parsed.data.destination);
-        await fs.rename(validSourcePath, validDestPath);
-        return {
-          content: [{ type: "text", text: `Successfully moved ${parsed.data.source} to ${parsed.data.destination}` }],
-        };
-      }
-
-      case "search_files": {
-        const parsed = SearchFilesArgsSchema.safeParse(args);
-        if (!parsed.success) {
-          throw new Error(`Invalid arguments for search_files: ${parsed.error}`);
-        }
-        const validPath = await validatePath(parsed.data.path);
-        const results = await searchFiles(validPath, parsed.data.pattern);
-        return {
-          content: [{ type: "text", text: results.length > 0 ? results.join("\n") : "No matches found" }],
-        };
-      }
-
-      case "get_file_info": {
-        const parsed = GetFileInfoArgsSchema.safeParse(args);
-        if (!parsed.success) {
-          throw new Error(`Invalid arguments for get_file_info: ${parsed.error}`);
-        }
-        const validPath = await validatePath(parsed.data.path);
-        const info = await getFileStats(validPath);
-        return {
-          content: [{ type: "text", text: Object.entries(info)
-            .map(([key, value]) => `${key}: ${value}`)
-            .join("\n") }],
-        };
-      }
-
-      case "list_allowed_directories": {
-        return {
-          content: [{ 
-            type: "text", 
-            text: `Allowed directories:\n${allowedDirectories.join('\n')}` 
-          }],
-        };
-      }
-
-      default:
-        throw new Error(`Unknown tool: ${name}`);
-    }
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    return {
-      content: [{ type: "text", text: `Error: ${errorMessage}` }],
-      isError: true,
-    };
-  }
-});
-
-// Start server
-async function runServer() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error("Secure MCP Filesystem Server running on stdio");
-  console.error("Allowed directories:", allowedDirectories);
-}
-
-runServer().catch((error) => {
-  console.error("Fatal error running server:", error);
-  process.exit(1);
-});
+/src/filesystem/index.ts

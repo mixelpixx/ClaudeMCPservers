@@ -4,11 +4,6 @@ Node.js server implementing Model Context Protocol (MCP) for filesystem operatio
 
 ## Features
 
-- Read/write files
-- Create/list/delete directories
-- Move files/directories
-- Search files
-- Get file metadata
 
 **Note**: The server will only allow operations within directories specified via `args`.
 
@@ -16,44 +11,36 @@ Node.js server implementing Model Context Protocol (MCP) for filesystem operatio
 
 ### Resources
 
-- `file://system`: File system operations interface
 
 ### Tools
 
-- **read_file**
   - Read complete contents of a file
   - Input: `path` (string)
   - Reads complete file contents with UTF-8 encoding
 
-- **read_multiple_files**
   - Read multiple files simultaneously
   - Input: `paths` (string[])
   - Failed reads won't stop the entire operation
 
-- **write_file**
   - Create new file or overwrite existing (exercise caution with this)
   - Inputs:
     - `path` (string): File location
     - `content` (string): File content
 
-- **create_directory**
   - Create new directory or ensure it exists
   - Input: `path` (string)
   - Creates parent directories if needed
   - Succeeds silently if directory exists
 
-- **list_directory**
   - List directory contents with [FILE] or [DIR] prefixes
   - Input: `path` (string)
 
-- **move_file**
   - Move or rename files and directories
   - Inputs:
     - `source` (string)
     - `destination` (string)
   - Fails if destination exists
 
-- **search_files**
   - Recursively search for files/directories
   - Inputs:
     - `path` (string): Starting directory
@@ -61,7 +48,52 @@ Node.js server implementing Model Context Protocol (MCP) for filesystem operatio
   - Case-insensitive matching
   - Returns full paths to matches
 
-- **get_file_info**
+  - Compress a file using specified algorithm
+  - Inputs:
+    - `path` (string): File to compress
+    - `algorithm` (string): 'gzip', 'deflate', or 'brotli'
+  - Saves compressed file with appropriate extension
+
+  - Decompress a file using specified algorithm
+  - Inputs:
+    - `path` (string): File to decompress
+    - `algorithm` (string): 'gzip', 'deflate', or 'brotli'
+  - Saves decompressed file without compression extension
+
+  - Encrypt a file using AES-256-CBC
+  - Inputs:
+    - `path` (string): File to encrypt
+    - `password` (string): Encryption password
+  - Saves encrypted file with .enc extension
+
+  - Decrypt a file encrypted with encrypt_file
+  - Inputs:
+    - `path` (string): File to decrypt
+    - `password` (string): Decryption password
+  - Saves decrypted file without .enc extension
+
+  - Compare two text files
+  - Inputs:
+    - `path1` (string): First file path
+    - `path2` (string): Second file path
+  - Returns differences in human-readable format
+
+  - Search for a term within a text file
+  - Inputs:
+    - `path` (string): File to search
+    - `searchTerm` (string): Term to search for
+  - Returns matching lines with line numbers
+
+  - Generate a hash of a file
+  - Inputs:
+    - `path` (string): File to hash
+    - `algorithm` (string): 'md5', 'sha1', 'sha256', or 'sha512'
+  - Returns the hash value
+
+  - Detect the type of a file based on its content
+  - Input: `path` (string)
+  - Returns the detected MIME type
+
   - Get detailed file/directory metadata
   - Input: `path` (string)
   - Returns:
@@ -72,7 +104,6 @@ Node.js server implementing Model Context Protocol (MCP) for filesystem operatio
     - Type (file/directory)
     - Permissions
 
-- **list_allowed_directories**
   - List all directories the server is allowed to access
   - No input required
   - Returns:
@@ -80,22 +111,3 @@ Node.js server implementing Model Context Protocol (MCP) for filesystem operatio
 
 ## Usage with Claude Desktop
 Add this to your `claude_desktop_config.json`:
-```json
-{
-  "mcpServers": {
-    "filesystem": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "/Users/username/Desktop",
-        "/path/to/other/allowed/dir"
-      ]
-    }
-  }
-}
-```
-
-## License
-
-This MCP server is licensed under the MIT License. This means you are free to use, modify, and distribute the software, subject to the terms and conditions of the MIT License. For more details, please see the LICENSE file in the project repository.
