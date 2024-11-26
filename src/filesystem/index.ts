@@ -14,7 +14,7 @@ import zlib from 'zlib';
 import crypto from 'crypto';
 import { promisify } from 'util';
 import { diffLines } from 'diff';
-import fileType from 'file-type';
+import { fileTypeFromFile } from 'file-type';
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 
@@ -398,8 +398,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   };
 });
 
-
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  let response: any = undefined;
   try {
     const { name, arguments: args } = request.params;
 
@@ -411,9 +411,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         const validPath = await validatePath(parsed.data.path);
         const content = await fs.readFile(validPath, "utf-8");
-        return {
+        response = {
           content: [{ type: "text", text: content }],
         };
+        break;
       }
 
       case "read_multiple_files": {
@@ -433,14 +434,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
           }),
         );
-        return {
+        response = {
           content: [{ type: "text", text: results.join("\n") }],
         };
+        break;
+      }
+
+      case "detect_file_type": {
+        const parsed = GetFileInfoArgsSchema.safeParse(args);
+        const validPath = await validatePath(parsed.data.path);
+        const type = await fileTypeFromFile(validPath);
+        response = {
+          content: [{ type: "text", text: type ? `File type: ${type.mime}` : "Unknown file type" }],
+        };
+        break;
       }
 
       // Additional cases for other tools would go here...
 
     }
+    return response;
   } catch (error) {
     console.error("Error handling request:", error);
     throw new Error("Internal server error");
